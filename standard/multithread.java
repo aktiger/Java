@@ -1,4 +1,4 @@
-package standard;
+//package standard;
 /*
  2012-11-10 16:07:21
  Only one public class in a java file is allowed! 
@@ -18,7 +18,7 @@ public class multithread
 		
 		for (int i =0; i<10; i++)
 		{
-			System.out.println("I'm parent process£¡");
+			System.out.println("I'm parent process");
 		}
 	}
 	
