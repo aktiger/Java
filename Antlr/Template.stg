@@ -1,0 +1,189 @@
+
+classDeclare(classname, fieldnames, setNames, length_1, dbtable) ::= <<
+\<?php
+class <classname> {
+
+<fieldnames:{ n | <getfunction(n)> 
+} >
+
+<setNames: {fi | <setfunction(fi)>
+}>
+
+<insert(setNames, classname)>
+<update(setNames)>
+<delete(first(fieldnames))>
+<getByPK(fieldnames, classname, length_1)>
+<construct(setNames)>
+
+<const_select(setNames)>
+<const_delete(first(fieldnames), dbtable)>
+<const_insert(setNames, dbtable)>
+<const_update(setNames)>
+
+<fieldnames: {fi | <memDef(fi)>
+}>
+    private $_changed;
+}
+?>
+
+>>
+
+getfunction(name) ::= 
+<<
+    public function <name>() {
+        return $this->_<name>;
+    }
+>>
+ 
+setfunction(name) ::= 
+<<
+    public function <name.setName>($<name.field>){
+    	if(<name.cond>($<name.field>)) {
+            if($this->_<name.field> !== $<name.field>){
+                $this->_<name.field> = $<name.field>;
+                $this->_changed = true;
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+>> 
+
+memDef(member)::= <<
+    private $_<member>;
+>>
+
+paramDef(ps)::= << < reverse(rest(reverse(ps))) : { p | $<p.field>, } > $<last(ps).field> >>
+assertStat(type, member)::= 
+<<    assert(<type>($<member>));
+>>
+
+insert(params, classname) ::= <<
+
+    public static function insert( <paramDef(rest(params))>) {
+
+    <rest(params): {p|<assertStat(p.cond, p.field)>
+    }>
+		
+	$pdo = DBConnect::getPDO();
+	$sql = sprintf(self::INSERT_SQL_PATTERN,<paramDef(rest(params))>);
+	ret = $pdo->exec($sql);
+        if (1 != $ret) {
+        $msgs = $pdo->errorInfo();            
+            UB_LOG_WARNING('[%s:%d] Insert Failed. [<first(params).field>:%u] [sql:%s] [err:%s:%d:%s] ',
+                __FILE__, __LINE__, $<first(params).field>, $sql, $msgs[0], $msgs[1], $msgs[2]);            
+        return false;
+        } else {
+          return new <classname>(intval($pdo->lastInsertId()), <paramDef(rest(params))>);
+        }
+    }
+
+>>
+
+delete(first) ::= << 
+    public function delete() {
+        $pdo = DBConnect::getPDO();
+        $sql = sprintf(self::DELETE_SQL_PATTERN, $this->_<first>);
+        $ret = $pdo->exec($sql);
+        if (1 !== $ret) {
+            $msgs = $pdo->errorInfo();
+            UB_LOG_WARNING('[%s:%d] Delete Failed. [sql:%s] [err:%s:%d:%s] ',
+                __FILE__, __LINE__, $sql, $msgs[0], $msgs[1], $msgs[2]);
+            return false;
+        }else {
+            return true;
+        }
+    }
+
+>> 
+
+update_help(pa) ::= << 
+            is_string($this->_<pa>)?$pdo->quote($this->_<pa>):(is_null($this->_<pa>)?'NULL':$this->_<pa>),
+>>
+
+
+update(params) ::= << 
+    public function update() {
+        if ($this->_changed) {
+            $pdo = DBConnect::getPDO();
+            $sql = sprintf(self::UPDATE_SQL_PATTERN, <rest(params):{pa| <update_help(pa.field)>}> <update_help(first(params).field)>);
+
+            $ret = $pdo->exec($sql);
+            $msgs = $pdo->errorInfo();
+            if (1 !== $ret && !empty($msgs[1])) {
+                UB_LOG_WARNING('[%s:%d] Update Failed. [sql:%s] [err:%s:%d:%s] ',
+                    __FILE__, __LINE__,  $sql, $msgs[0], $msgs[1], $msgs[2]);
+                return false;
+            } else {
+                $this->changed = false;
+                return true;
+            }
+        } else {
+            return true;
+        }
+    }
+
+>>
+
+getByPK(fields, classname, length_1) ::= <<
+    public static function getByPK($<first(fields)>) {
+
+        $pdo = DBConnect::getPDO();
+        $sql = sprintf(self::SELECT_SQL_PATTERN, $<first(fields)>);
+        $stt = $pdo->query($sql);
+        if (false === $stt) {
+            $msgs = $pdo->errorInfo();
+            UB_LOG_WARNING('[%s:%d] Select Failed. [sql:%s] [err:%s:%d:%s] ',
+                __FILE__, __LINE__,  $sql, $msgs[0], $msgs[1], $msgs[2]);
+            return false;
+        } else {
+            $rst = $stt->fetchAll(PDO::FETCH_NUM);
+            $monitor = array();
+            
+            $rst = $stt->fetchAll(PDO::FETCH_NUM);                                                                   
+            $row = $rst[0];
+            $obj = new <classname>( <reverse(rest(reverse(fields))): {f|$row[<i0>], }>$row[<length_1>]  );
+            return $obj;
+        }
+    }
+>>
+
+
+construct_stat(params) ::= << 
+$this->_<params> = $<params>;
+>>
+
+construct(params) ::= <<
+    private function __construct(<paramDef(params)>) {
+        <params: {p | <construct_stat(p.field)>  }>
+
+        $this->_changed = false;
+     }
+
+
+>>
+
+const_delete(PK, tablename) ::= <<
+    CONST DELETE_SQL_PATTERN =
+        'DELETE FROM <tablename> WHERE <PK>=%u';
+>>
+const_insert(setNames, tablename) ::= <<
+    CONST INSERT_SQL_PATTERN =
+        'INSERT <tablename> (<paramDef(rest(setNames))>)
+         VALUES (<rest(setNames) : {sn| %s, }>%s)';    
+
+>>
+const_select(setNames) ::= <<
+    CONST SELECT_SQL_PATTERN =
+        'SELECT <paramDef(setNames)> FROM
+        mon_monitor WHERE <first(setNames).field>=%u';
+>>
+const_update(setNames) ::= <<
+    CONST UPDATE_SQL_PATTERN =
+        'UPDATE mon_monitor SET 
+         < rest(setNames):{sn| <sn.field>=%s, }> <first(setNames.field)>=%s
+         current_version=%u, monitor_name=%s, monitor_description=%s, monitor_status=%u 
+         WHERE <first(setNames).field>=%u';    
+>>
